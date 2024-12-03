@@ -35,112 +35,88 @@ check_requirements() {
     fi
 }
 
+# Load environment variables
+load_environment() {
+    log_info "Loading environment variables..."
+    
+    # Check if .env file exists
+    if [ ! -f .env ]; then
+        if [ -f .env.production ]; then
+            log_info "Using .env.production file"
+            cp .env.production .env
+        elif [ -f .env.example ]; then
+            log_warn "Using .env.example file. Please update with production values."
+            cp .env.example .env
+        else
+            log_error "No .env file found"
+            exit 1
+        fi
+    fi
+
+    # Export all variables from .env file
+    set -a
+    source .env
+    set +a
+
+    # Validate required variables
+    required_vars=(
+        "DB_ROOT_PASSWORD"
+        "DB_USER"
+        "DB_PASSWORD"
+        "DB_NAME"
+        "JWT_SECRET"
+        "ADMIN_EMAIL"
+        "ADMIN_PASSWORD"
+        "ROCKETCHAT_ADMIN_PASSWORD"
+        "DISCOURSE_DB_PASSWORD"
+        "DISCOURSE_ADMIN_PASSWORD"
+        "NEXTCLOUD_DB_PASSWORD"
+        "NEXTCLOUD_ADMIN_PASSWORD"
+    )
+
+    for var in "${required_vars[@]}"; do
+        if [ -z "${!var}" ]; then
+            log_error "Required variable $var is not set in .env file"
+            exit 1
+        fi
+    }
+}
+
 # Set up directories and permissions
 setup_directories() {
     log_info "Setting up directories..."
     
     # Create necessary directories
     mkdir -p secrets uploads logs backups \
-            docker/{mariadb,nextcloud,discourse}/{conf.d,init}
-    
-    # Generate secure passwords if they don't exist
-    if [ ! -f secrets/db_root_password.txt ]; then
-        openssl rand -base64 32 > secrets/db_root_password.txt
-    fi
-    
-    if [ ! -f secrets/db_password.txt ]; then
-        openssl rand -base64 32 > secrets/db_password.txt
-    fi
-
-    if [ ! -f secrets/nextcloud_admin_password.txt ]; then
-        openssl rand -base64 32 > secrets/nextcloud_admin_password.txt
-    fi
-
-    # Export environment variables
-    export DB_ROOT_PASSWORD=$(cat secrets/db_root_password.txt)
-    export DB_PASSWORD=$(cat secrets/db_password.txt)
-    export DB_USER=innovation_user
-    export DB_NAME=innovation_network
-    export NEXTCLOUD_ADMIN_PASSWORD=$(cat secrets/nextcloud_admin_password.txt)
-    export NEXTCLOUD_ADMIN_USER=admin
-    export DOMAIN=${DOMAIN:-"localhost"}
+            docker/{jitsi/web,mariadb/{conf.d,init},phpmyadmin} \
+            docker/{rocketchat,discourse,nextcloud}
     
     # Set permissions
-    chmod 600 secrets/*
-    chmod 755 docker/{mariadb,nextcloud,discourse}/{conf.d,init}
-}
-
-# Configure services
-configure_services() {
-    log_info "Configuring services..."
-
-    # Get domain from environment or use default
-    DOMAIN=${DOMAIN:-"localhost"}
-    PROTOCOL=${PROTOCOL:-"https"}
-    
-    # Configure Nextcloud
-    cat > docker/nextcloud/config.php <<EOF
-<?php
-\$CONFIG = array (
-  'trusted_domains' => array('${DOMAIN}'),
-  'overwrite.cli.url' => '${PROTOCOL}://${DOMAIN}/nextcloud',
-  'default_language' => 'es',
-  'default_locale' => 'es_ES',
-  'default_phone_region' => 'ES',
-);
-EOF
-
-    # Store service URLs for the application
-    echo "${PROTOCOL}://${DOMAIN}/nextcloud" > secrets/nextcloud_url.txt
-    echo "${PROTOCOL}://${DOMAIN}/forum" > secrets/discourse_url.txt
-    
-    log_info "Nextcloud URL: ${PROTOCOL}://${DOMAIN}/nextcloud"
-    log_info "Discourse URL: ${PROTOCOL}://${DOMAIN}/forum"
+    chmod -R 755 docker uploads logs backups
 }
 
 # Deploy application
 deploy_app() {
     log_info "Deploying application..."
     
-    # Create .env file for docker-compose
-    cat > .env <<EOF
-# Database Configuration
-DB_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
-DB_USER=${DB_USER}
-DB_PASSWORD=${DB_PASSWORD}
-DB_NAME=${DB_NAME}
+    # Pull latest images
+    log_info "Pulling Docker images..."
+    docker compose pull
 
-# Domain Configuration
-DOMAIN=${DOMAIN}
-PROTOCOL=${PROTOCOL}
-
-# Nextcloud Configuration
-NEXTCLOUD_ADMIN_USER=${NEXTCLOUD_ADMIN_USER}
-NEXTCLOUD_ADMIN_PASSWORD=${NEXTCLOUD_ADMIN_PASSWORD}
-
-# Email Configuration (configure through admin panel)
-SMTP_HOST=
-SMTP_PORT=
-SMTP_USER=
-SMTP_PASSWORD=
-EOF
-    
     # Build and start containers
-    docker compose build --no-cache
+    log_info "Starting services..."
     docker compose up -d
-    
-    # Check container status
-    docker compose ps
-    
+
     # Wait for services to be healthy
     log_info "Waiting for services to be ready..."
     sleep 30
     
-    # Check logs for errors
-    docker compose logs --tail=100
+    # Check container status
+    docker compose ps
 
-    # Configure services after deployment
-    configure_services
+    # Check logs for errors
+    log_info "Checking service logs..."
+    docker compose logs --tail=100
 }
 
 # Main function
@@ -151,25 +127,23 @@ main() {
     if [ "$EUID" -ne 0 ]; then 
         log_error "This script must be run as root"
         exit 1
-    fi
+    }
     
     check_requirements
+    load_environment
     setup_directories
     deploy_app
     
     log_info "Deployment completed successfully"
     
     # Show service URLs
-    if [ -f secrets/nextcloud_url.txt ]; then
-        NEXTCLOUD_URL=$(cat secrets/nextcloud_url.txt)
-        log_info "Nextcloud is available at: ${NEXTCLOUD_URL}"
-        log_info "Nextcloud admin password is stored in secrets/nextcloud_admin_password.txt"
-    fi
-
-    if [ -f secrets/discourse_url.txt ]; then
-        DISCOURSE_URL=$(cat secrets/discourse_url.txt)
-        log_info "Forum is available at: ${DISCOURSE_URL}"
-    fi
+    log_info "Services are available at:"
+    echo "Main application: https://${DOMAIN}"
+    echo "Chat: https://${DOMAIN}/chat"
+    echo "Forum: https://${DOMAIN}/forum"
+    echo "Nextcloud: https://${DOMAIN}/nextcloud"
+    echo "Documentation: https://${DOMAIN}/docs"
+    echo "Video Meetings: https://${DOMAIN}/meet"
 }
 
 # Run script
