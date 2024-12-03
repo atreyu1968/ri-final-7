@@ -1,25 +1,29 @@
+version: '3.9'
+
 services:
   app:
     build:
       context: .
       dockerfile: docker/node/Dockerfile
       args:
-        NODE_ENV: production
+        NODE_ENV: ${NODE_ENV:-production}
     container_name: innovation-app
     restart: unless-stopped
     environment:
-      - NODE_ENV=production
-      - DB_HOST=db
-      - DB_PORT=3306
+      - NODE_ENV=${NODE_ENV:-production}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=${DB_NAME}
       - JWT_SECRET=${JWT_SECRET}
+      - DOMAIN=${DOMAIN}
+      - PROTOCOL=${PROTOCOL}
     volumes:
       - ./uploads:/app/uploads
       - ./logs:/app/logs
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:3000"
     networks:
       - innovation_net
     depends_on:
@@ -31,14 +35,12 @@ services:
     container_name: innovation-db
     restart: unless-stopped
     environment:
-      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
-      MARIADB_DATABASE: ${DB_NAME}
-      MARIADB_USER: ${DB_USER}
-      MARIADB_PASSWORD: ${DB_PASSWORD}
+      - MARIADB_ROOT_PASSWORD=${DB_PASSWORD}
+      - MARIADB_DATABASE=${DB_NAME}
+      - MARIADB_USER=${DB_USER}
+      - MARIADB_PASSWORD=${DB_PASSWORD}
     volumes:
       - db_data:/var/lib/mysql
-      - ./docker/mariadb/conf.d:/etc/mysql/conf.d:ro
-      - ./docker/mariadb/init:/docker-entrypoint-initdb.d:ro
     ports:
       - "127.0.0.1:3306:3306"
     networks:
@@ -50,51 +52,20 @@ services:
       retries: 5
 
   phpmyadmin:
-    image: phpmyadmin/phpmyadmin:latest
+    image: phpmyadmin/phpmyadmin:5.2.1
     container_name: innovation-phpmyadmin
     restart: unless-stopped
     environment:
       - PMA_HOST=db
-      - PMA_PORT=3306
-      - UPLOAD_LIMIT=128M
-      - MEMORY_LIMIT=512M
-      - MAX_EXECUTION_TIME=300
-    volumes:
-      - ./docker/phpmyadmin/config.user.inc.php:/etc/phpmyadmin/config.user.inc.php:ro
-      - ./docker/phpmyadmin/sessions:/sessions
+      - PMA_PORT=${DB_PORT}
     networks:
       - innovation_net
     depends_on:
-      - db
-
-  rocketchat:
-    image: registry.rocket.chat/rocketchat/rocket.chat:latest
-    container_name: innovation-chat
-    restart: unless-stopped
-    environment:
-      - MONGO_URL=mongodb://mongo:27017/rocketchat?replicaSet=rs0
-      - MONGO_OPLOG_URL=mongodb://mongo:27017/local?replicaSet=rs0
-      - ROOT_URL=https://redinnovacionfp.es/chat
-      - PORT=3000
-      - DEPLOY_METHOD=docker
-      - ADMIN_USERNAME=admin
-      - ADMIN_PASS=${ROCKETCHAT_ADMIN_PASSWORD}
-      - ADMIN_EMAIL=${ADMIN_EMAIL}
-      - CREATE_TOKENS_FOR_USERS=true
-    depends_on:
-      - mongo
-    networks:
-      - innovation_net
-    healthcheck:
-      test: >
-        curl --fail http://localhost:3000 ||
-        exit 1
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      db:
+        condition: service_healthy
 
   mongo:
-    image: mongo:6
+    image: mongo:6.0.4
     container_name: innovation-mongo
     restart: unless-stopped
     command: mongod --oplogSize 128 --replSet rs0
@@ -109,66 +80,24 @@ services:
       retries: 5
       start_period: 40s
 
-  mongo-init-replica:
-    image: mongo:6
-    restart: "no"
-    command: >
-      bash -c "
-        sleep 10 &&
-        mongosh --host mongo:27017 --eval '
-          rs.initiate({
-            _id: \"rs0\",
-            members: [{ _id: 0, host: \"mongo:27017\" }]
-          })
-        '
-      "
-    depends_on:
-      - mongo
-    networks:
-      - innovation_net
-
   discourse:
-    image: bitnami/discourse:latest
+    image: bitnami/discourse:2.1.8
     container_name: innovation-forum
     restart: unless-stopped
     environment:
-      - DISCOURSE_HOST=redinnovacionfp.es
-      - DISCOURSE_PORT_NUMBER=3000
-      - DISCOURSE_EXTERNAL_PORT=443
-      - DISCOURSE_EXTERNAL_HTTPS=true
+      - DISCOURSE_HOST=${DOMAIN}
       - DISCOURSE_POSTGRESQL_HOST=discourse-db
       - DISCOURSE_POSTGRESQL_PORT_NUMBER=5432
       - DISCOURSE_POSTGRESQL_USER=discourse
       - DISCOURSE_POSTGRESQL_PASSWORD=${DISCOURSE_DB_PASSWORD}
       - DISCOURSE_POSTGRESQL_DATABASE=discourse
-      - DISCOURSE_REDIS_HOST=discourse-redis
-      - DISCOURSE_REDIS_PORT_NUMBER=6379
-      - DISCOURSE_SMTP_HOST=${SMTP_HOST}
-      - DISCOURSE_SMTP_PORT=${SMTP_PORT}
-      - DISCOURSE_SMTP_USER=${SMTP_USER}
-      - DISCOURSE_SMTP_PASSWORD=${SMTP_PASSWORD}
-      - DISCOURSE_SMTP_PROTOCOL=tls
-      - DISCOURSE_SMTP_AUTH=login
-      - DISCOURSE_NOTIFICATION_EMAIL=${ADMIN_EMAIL}
       - DISCOURSE_ADMIN_EMAIL=${ADMIN_EMAIL}
       - DISCOURSE_ADMIN_PASSWORD=${DISCOURSE_ADMIN_PASSWORD}
-      - DISCOURSE_ADMIN_USERNAME=admin
-      - DISCOURSE_PRECOMPILE_ASSETS=yes
-      - DISCOURSE_SERVE_STATIC_ASSETS=yes
-      - DISCOURSE_SIDEKIQ_WORKERS=1
-    volumes:
-      - discourse_data:/bitnami/discourse
-      - discourse_assets:/opt/bitnami/discourse/public
     networks:
       - innovation_net
     depends_on:
-      - discourse-db
-      - discourse-redis
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/srv/status"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      discourse-db:
+        condition: service_healthy
 
   discourse-db:
     image: bitnami/postgresql:15
@@ -188,55 +117,49 @@ services:
       timeout: 5s
       retries: 5
 
-  discourse-redis:
-    image: bitnami/redis:latest
-    container_name: innovation-forum-redis
+  rocketchat:
+    image: rocketchat/rocket.chat:5.4.0
+    container_name: innovation-chat
     restart: unless-stopped
     environment:
-      - ALLOW_EMPTY_PASSWORD=yes
+      - MONGO_URL=mongodb://mongo:27017/rocketchat?replicaSet=rs0
+      - MONGO_OPLOG_URL=mongodb://mongo:27017/local?replicaSet=rs0
+      - ROOT_URL=${PROTOCOL}://${DOMAIN}/chat
+      - PORT=3000
+      - DEPLOY_METHOD=docker
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASS=${ROCKETCHAT_ADMIN_PASSWORD}
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+    depends_on:
+      mongo:
+        condition: service_healthy
     networks:
       - innovation_net
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
+      test: >
+        curl --fail http://localhost:3000 ||
+        exit 1
+      interval: 30s
+      timeout: 10s
       retries: 5
 
   nextcloud:
-    image: nextcloud:latest
+    image: nextcloud:26.0.0
     container_name: innovation-nextcloud
     restart: unless-stopped
     environment:
       - POSTGRES_HOST=nextcloud-db
-      - POSTGRES_DB=nextcloud
       - POSTGRES_USER=nextcloud
       - POSTGRES_PASSWORD=${NEXTCLOUD_DB_PASSWORD}
       - NEXTCLOUD_ADMIN_USER=admin
       - NEXTCLOUD_ADMIN_PASSWORD=${NEXTCLOUD_ADMIN_PASSWORD}
-      - NEXTCLOUD_TRUSTED_DOMAINS=redinnovacionfp.es
-      - SMTP_HOST=${SMTP_HOST}
-      - SMTP_PORT=${SMTP_PORT}
-      - SMTP_NAME=${SMTP_USER}
-      - SMTP_PASSWORD=${SMTP_PASSWORD}
-      - MAIL_FROM_ADDRESS=nextcloud@redinnovacionfp.es
-      - MAIL_DOMAIN=redinnovacionfp.es
-      - PHP_MEMORY_LIMIT=512M
-      - PHP_UPLOAD_LIMIT=512M
     volumes:
       - nextcloud_data:/var/www/html
-      - nextcloud_custom_apps:/var/www/html/custom_apps
-      - nextcloud_config:/var/www/html/config
-      - nextcloud_data_data:/var/www/html/data
     networks:
       - innovation_net
     depends_on:
       nextcloud-db:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/status.php"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
 
   nextcloud-db:
     image: postgres:15
@@ -275,32 +198,22 @@ services:
       retries: 5
 
   jitsi-web:
-    image: jitsi/web:latest
+    image: jitsi/web:stable-7648
     container_name: innovation-meet
     restart: unless-stopped
-    volumes:
-      - ./docker/jitsi/web:/config
-      - ./docker/jitsi/web/crontabs:/var/spool/cron/crontabs
     environment:
+      - PUBLIC_URL=${PROTOCOL}://${DOMAIN}/meet
       - ENABLE_AUTH=1
       - ENABLE_GUESTS=1
-      - PUBLIC_URL=https://redinnovacionfp.es/meet
-      - JICOFO_AUTH_USER=focus
       - XMPP_DOMAIN=meet.jitsi
       - XMPP_AUTH_DOMAIN=auth.meet.jitsi
       - XMPP_BOSH_URL_BASE=http://xmpp.meet.jitsi:5280
-      - XMPP_GUEST_DOMAIN=guest.meet.jitsi
-      - XMPP_MUC_DOMAIN=muc.meet.jitsi
       - TZ=Europe/Madrid
       - DISABLE_HTTPS=1
-      - ENABLE_HTTP_REDIRECT=1
     networks:
       - innovation_net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+    volumes:
+      - ./docker/jitsi/web:/config
 
 networks:
   innovation_net:
@@ -309,11 +222,6 @@ networks:
 volumes:
   db_data:
   mongo_data:
-  discourse_data:
-  discourse_assets:
   discourse_db_data:
   nextcloud_data:
-  nextcloud_custom_apps:
-  nextcloud_config:
-  nextcloud_data_data:
   nextcloud_db_data:
