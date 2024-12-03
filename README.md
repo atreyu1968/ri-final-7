@@ -57,7 +57,7 @@ mkdir -p /opt/innovation
 cd /opt/innovation
 
 # Clonar repositorio
-git clone https://github.com/atreyu1968/ri-final-4.git .
+git clone https://github.com/atreyu1968/ri-final-7.git .
 ```
 
 ### 5. Configurar Variables de Entorno
