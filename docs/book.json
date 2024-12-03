@@ -1,0 +1,27 @@
+{
+  "title": "Red de Innovación FP",
+  "description": "Documentación oficial del sistema",
+  "author": "Ateca TechLab",
+  "language": "es",
+  "structure": {
+    "readme": "README.md",
+    "summary": "SUMMARY.md"
+  },
+  "plugins": [
+    "theme-default",
+    "search",
+    "hints",
+    "copy-code-button",
+    "expandable-chapters",
+    "back-to-top-button"
+  ],
+  "pluginsConfig": {
+    "theme-default": {
+      "showLevel": true,
+      "logo": "assets/logo.png"
+    }
+  },
+  "styles": {
+    "website": "styles/website.css"
+  }
+}
