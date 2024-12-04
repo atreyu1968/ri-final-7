@@ -24,15 +24,35 @@ log_error() {
 check_requirements() {
     log_info "Checking requirements..."
     
+    # Check if Docker is installed
     if ! command -v docker &> /dev/null; then
-        log_error "Docker is not installed"
-        exit 1
+        log_error "Docker is not installed. Installing Docker..."
+        apt update && apt install -y docker.io
+        systemctl start docker
+        systemctl enable docker
     fi
 
+    # Check if Docker Compose is installed
     if ! command -v docker-compose &> /dev/null; then
-        log_error "Docker Compose is not installed"
-        exit 1
+        log_error "Docker Compose is not installed. Installing Docker Compose..."
+        curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        chmod +x /usr/local/bin/docker-compose
     fi
+
+    # Check if Node.js and npm are installed
+    if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
+        log_error "Node.js or npm is not installed. Installing Node.js and npm..."
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+        apt install -y nodejs
+    fi
+
+    # Check if Vite is installed globally
+    if ! command -v vite &> /dev/null; then
+        log_error "Vite is not installed globally. Installing Vite..."
+        npm install -g vite
+    fi
+
+    log_info "All requirements are satisfied."
 }
 
 # Load environment variables
@@ -59,27 +79,17 @@ load_environment() {
     set +a
 
     # Validate required variables
-    required_vars=(
-        "DB_ROOT_PASSWORD"
-        "DB_USER"
-        "DB_PASSWORD"
-        "DB_NAME"
-        "JWT_SECRET"
-        "ADMIN_EMAIL"
-        "ADMIN_PASSWORD"
-        "ROCKETCHAT_ADMIN_PASSWORD"
-        "DISCOURSE_DB_PASSWORD"
-        "DISCOURSE_ADMIN_PASSWORD"
-        "NEXTCLOUD_DB_PASSWORD"
-        "NEXTCLOUD_ADMIN_PASSWORD"
-    )
+    required_vars=( "DB_ROOT_PASSWORD" "DB_USER" "DB_PASSWORD" "DB_NAME" "JWT_SECRET" 
+                    "ADMIN_EMAIL" "ADMIN_PASSWORD" "ROCKETCHAT_ADMIN_PASSWORD" 
+                    "DISCOURSE_DB_PASSWORD" "DISCOURSE_ADMIN_PASSWORD" 
+                    "NEXTCLOUD_DB_PASSWORD" "NEXTCLOUD_ADMIN_PASSWORD" )
 
     for var in "${required_vars[@]}"; do
         if [ -z "${!var}" ]; then
             log_error "Required variable $var is not set in .env file"
             exit 1
         fi
-    }
+    done
 }
 
 # Set up directories and permissions
@@ -95,28 +105,39 @@ setup_directories() {
     chmod -R 755 docker uploads logs backups
 }
 
+# Install project dependencies
+install_dependencies() {
+    log_info "Installing project dependencies..."
+    
+    if [ -f package.json ]; then
+        npm install
+    else
+        log_warn "No package.json found. Skipping dependency installation."
+    fi
+}
+
 # Deploy application
 deploy_app() {
     log_info "Deploying application..."
     
     # Pull latest images
     log_info "Pulling Docker images..."
-    docker compose pull
+    docker-compose pull
 
     # Build and start containers
     log_info "Starting services..."
-    docker compose up -d
+    docker-compose up -d
 
     # Wait for services to be healthy
     log_info "Waiting for services to be ready..."
     sleep 30
     
     # Check container status
-    docker compose ps
+    docker-compose ps
 
     # Check logs for errors
     log_info "Checking service logs..."
-    docker compose logs --tail=100
+    docker-compose logs --tail=100
 }
 
 # Main function
@@ -127,11 +148,12 @@ main() {
     if [ "$EUID" -ne 0 ]; then 
         log_error "This script must be run as root"
         exit 1
-    }
+    fi
     
     check_requirements
     load_environment
     setup_directories
+    install_dependencies
     deploy_app
     
     log_info "Deployment completed successfully"
