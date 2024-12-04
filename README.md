@@ -14,6 +14,28 @@ Sistema de gestión para redes de innovación en formación profesional.
 ## Instalación desde Cero
 
 ### 1. Actualizar Sistema
+Crear el Archivo del Script: Guarda el script en un archivo llamado setup-server.sh.
+
+bash
+Copiar código
+nano setup-server.sh
+Pega el contenido del script y guarda los cambios.
+...
+
+Hacer el Script Ejecutable:
+
+```bash
+Copiar código
+chmod +x setup-server.sh
+Ejecutar el Script:
+...
+```bash
+Copiar código
+sudo ./setup-server.sh
+...
+
+Códogo del script
+
 ```bash
 # Actualizar repositorios y paquetes
 apt update && apt upgrade -y
@@ -23,15 +45,113 @@ apt install -y curl git wget gnupg2 ca-certificates lsb-release apt-transport-ht
 ```
 
 ### 2. Instalar Docker
+Crea el archivo 
 ```bash
-# Añadir repositorio oficial de Docker
-curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+# #!/bin/bash
+set -e
 
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-# Instalar Docker y Docker Compose
-apt update
-apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+# Utility functions
+log_info() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    log_error "This script must be run as root"
+    exit 1
+fi
+
+# Update and upgrade the system
+log_info "Updating system..."
+apt update && apt upgrade -y
+
+# Install required packages
+log_info "Installing necessary packages..."
+apt install -y \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    gnupg \
+    software-properties-common \
+    git \
+    wget
+
+# Install Docker
+log_info "Installing Docker..."
+if ! command -v docker &> /dev/null; then
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+    apt update
+    apt install -y docker-ce docker-ce-cli containerd.io
+else
+    log_warn "Docker is already installed."
+fi
+
+# Enable and start Docker
+log_info "Enabling and starting Docker service..."
+systemctl enable docker
+systemctl start docker
+
+# Verify Docker installation
+log_info "Verifying Docker installation..."
+if ! docker --version &> /dev/null; then
+    log_error "Docker installation failed."
+    exit 1
+fi
+log_info "Docker $(docker --version) installed successfully."
+
+# Install Docker Compose
+log_info "Installing Docker Compose..."
+if ! command -v docker-compose &> /dev/null; then
+    curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose
+else
+    log_warn "Docker Compose is already installed."
+fi
+
+# Verify Docker Compose installation
+log_info "Verifying Docker Compose installation..."
+if ! docker-compose --version &> /dev/null; then
+    log_error "Docker Compose installation failed."
+    exit 1
+fi
+log_info "Docker Compose $(docker-compose --version) installed successfully."
+
+# Add current user to the docker group
+log_info "Adding current user to the docker group..."
+if ! groups "$USER" | grep -q "\bdocker\b"; then
+    usermod -aG docker "$USER"
+    log_warn "You need to log out and log back in for the changes to take effect."
+fi
+
+# Clone a repository from GitHub (optional)
+log_info "Cloning a GitHub repository (optional)..."
+read -p "Enter the GitHub repository URL (or press Enter to skip): " GITHUB_REPO
+if [ -n "$GITHUB_REPO" ]; then
+    git clone "$GITHUB_REPO"
+    log_info "Repository cloned successfully."
+else
+    log_warn "No repository URL provided. Skipping."
+fi
+
+# Final message
+log_info "Server configuration completed successfully."
+log_info "Docker and Docker Compose are ready to use."
+
 ```
 
 ### 3. Configurar Firewall
